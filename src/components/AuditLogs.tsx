@@ -1,10 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { t, useTranslation } from "../i18n";
 import type { RequestLog } from "../types";
+
+// Normalize SQLite UTC timestamps: old format lacks timezone, new format has Z suffix.
+function toUTC(ts: string): Date {
+  return new Date(ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
+}
 
 interface AuditLogsProps {
   token: string;
 }
+
+const PAGE_SIZE = 20;
 
 function formatJson(raw: string): string {
   if (!raw) return t("logs.emptyResponse");
@@ -18,6 +25,8 @@ function formatJson(raw: string): string {
 export function AuditLogs({ token }: AuditLogsProps) {
   const { t } = useTranslation();
   const [logs, setLogs] = useState<RequestLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState("");
@@ -26,29 +35,59 @@ export function AuditLogs({ token }: AuditLogsProps) {
   const allProviders = t("logs.allProviders");
   const allStatus = t("logs.allStatus");
 
-  useEffect(() => {
-    fetch("/api/logs", {
+  const fetchLogs = useCallback((p: number, prov: string, st: string) => {
+    const params = new URLSearchParams();
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", String((p - 1) * PAGE_SIZE));
+    if (prov && prov !== allProviders) params.set("provider", prov);
+    if (st && st !== allStatus) params.set("status", st);
+
+    fetch(`/api/logs?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) setLogs(data);
-        // Initialize filter defaults after translation is available
-        if (!provider) setProvider(allProviders);
-        if (!status) setStatus(allStatus);
+        if (data && Array.isArray(data.logs)) {
+          setLogs(data.logs);
+          setTotal(data.total || 0);
+          setPage(data.page || p);
+        }
       })
       .catch(console.error);
   }, [token, allProviders, allStatus]);
 
+  // Initial load
+  useEffect(() => {
+    if (!provider) setProvider(allProviders);
+    if (!status) setStatus(allStatus);
+    fetchLogs(1, provider || allProviders, status || allStatus);
+  }, [token]); // only on mount; filters trigger via onChange
+
   // Keep state in sync with translations
   useEffect(() => {
-    if (provider && provider !== allProviders && provider !== "OpenAI" && provider !== "Anthropic") setProvider(allProviders);
+    if (provider && provider !== allProviders && provider !== "OpenAI" && provider !== "Anthropic") {
+      setProvider(allProviders);
+    }
   }, [allProviders]);
 
   useEffect(() => {
     const statusValues = ["2xx", "4xx", "5xx"];
-    if (status && status !== allStatus && !statusValues.includes(status)) setStatus(allStatus);
+    if (status && status !== allStatus && !statusValues.includes(status)) {
+      setStatus(allStatus);
+    }
   }, [allStatus]);
+
+  const applyFilters = (newProvider: string, newStatus: string) => {
+    setProvider(newProvider);
+    setStatus(newStatus);
+    fetchLogs(1, newProvider, newStatus);
+  };
+
+  const goToPage = (p: number) => {
+    fetchLogs(p, provider, status);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const filtered = logs.filter((l) => {
     if (provider !== t("logs.allProviders") && l.provider !== provider) return false;
@@ -75,12 +114,12 @@ export function AuditLogs({ token }: AuditLogsProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <select value={provider} onChange={(e) => applyFilters(e.target.value, status)}>
           <option>{t("logs.allProviders")}</option>
           <option>OpenAI</option>
           <option>Anthropic</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select value={status} onChange={(e) => applyFilters(provider, e.target.value)}>
           <option>{t("logs.allStatus")}</option>
           <option>2xx</option>
           <option>4xx</option>
@@ -112,7 +151,7 @@ export function AuditLogs({ token }: AuditLogsProps) {
                 title={l.response_body || l.request_body ? t("logs.clickHint") : ""}
               >
                 <td className="mono">
-                  {new Date(l.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  {toUTC(l.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </td>
                 <td className="mono">{l.request_id}</td>
                 <td className="mono">{l.session_id}</td>
@@ -129,6 +168,45 @@ export function AuditLogs({ token }: AuditLogsProps) {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="pagination">
+          <span className="pagination-info">
+            {total.toLocaleString()} {t("logs.records")} · {t("logs.page")} {page}/{totalPages}
+          </span>
+          <div className="pagination-btns">
+            <button disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+              ‹ {t("logs.prev")}
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter((p) => {
+                // Show first, last, current, and neighbours (±1)
+                return p === 1 || p === totalPages || Math.abs(p - page) <= 1;
+              })
+              .reduce<(number | "…")[]>((acc, p, idx, arr) => {
+                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("…");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                p === "…" ? (
+                  <span key={`gap-${i}`} className="pagination-gap">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={p === page ? "active" : ""}
+                    onClick={() => goToPage(p)}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+            <button disabled={page >= totalPages} onClick={() => goToPage(page + 1)}>
+              {t("logs.next")} ›
+            </button>
+          </div>
+        </div>
+      )}
 
       {selectedLog && (
         <div

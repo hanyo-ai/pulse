@@ -49,6 +49,10 @@ const dict: Record<Lang, Record<string, string>> = {
     "logs.detailTitle": "Request Details",
     "logs.noData": "No request/response data",
     "logs.emptyResponse": "(empty response)",
+    "logs.records": "records",
+    "logs.page": "Page",
+    "logs.prev": "Prev",
+    "logs.next": "Next",
 
     // LoginPage
     "login.title": "Sign in to Panel",
@@ -309,6 +313,10 @@ const dict: Record<Lang, Record<string, string>> = {
     "logs.detailTitle": "请求详情",
     "logs.noData": "无请求/响应数据",
     "logs.emptyResponse": "(空响应)",
+    "logs.records": "条",
+    "logs.page": "页",
+    "logs.prev": "上一页",
+    "logs.next": "下一页",
 
     // LoginPage
     "login.title": "登录管理面板",

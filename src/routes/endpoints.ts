@@ -148,7 +148,7 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
         } catch { /* skip validation if models is not valid JSON */ }
       }
 
-      setClauses.push("updated_at = datetime('now')");
+      setClauses.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
       values.push(id);
       db.run(`UPDATE endpoints SET ${setClauses.join(", ")} WHERE id = ?`, values as (string | number | null)[]);
     }

@@ -102,7 +102,7 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
     }
 
     const passwordHash = await Bun.password.hash(newPassword, "bcrypt");
-    db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [passwordHash, result.user.id]);
+    db.run("UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [passwordHash, result.user.id]);
 
     // Invalidate all other sessions (keep current one by token)
     db.run("DELETE FROM auth_sessions WHERE user_id = ? AND token != ?", [result.user.id, result.token]);
@@ -214,13 +214,13 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
     }
 
     if (display_name !== undefined) {
-      db.run("UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE id = ?", [
+      db.run("UPDATE users SET display_name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [
         display_name,
         userId,
       ]);
     }
     if (role !== undefined) {
-      db.run("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?", [
+      db.run("UPDATE users SET role = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [
         role as UserRole,
         userId,
       ]);
@@ -233,7 +233,7 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
         });
       }
       const passwordHash = await Bun.password.hash(password, "bcrypt");
-      db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [
+      db.run("UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [
         passwordHash,
         userId,
       ]);

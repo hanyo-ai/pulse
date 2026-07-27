@@ -32,8 +32,8 @@ function initSchema(db: Database) {
       password_hash TEXT NOT NULL,
       display_name TEXT,
       role TEXT DEFAULT 'admin',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
+      updated_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z')
     )
   `);
 
@@ -43,7 +43,7 @@ function initSchema(db: Database) {
       user_id INTEGER NOT NULL,
       token TEXT UNIQUE NOT NULL,
       expires_at INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
@@ -59,8 +59,8 @@ function initSchema(db: Database) {
       latency TEXT DEFAULT '0ms',
       cost TEXT DEFAULT '$0.00',
       user_id INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
+      updated_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
@@ -73,7 +73,7 @@ function initSchema(db: Database) {
       content TEXT NOT NULL,
       tokens INTEGER DEFAULT 0,
       latency TEXT DEFAULT '—',
-      created_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     )
   `);
@@ -91,7 +91,7 @@ function initSchema(db: Database) {
       prompt_cache_hit_tokens INTEGER DEFAULT 0,
       prompt_cache_miss_tokens INTEGER DEFAULT 0,
       cost TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
     )
   `);
@@ -106,8 +106,8 @@ function initSchema(db: Database) {
       latency_ms INTEGER DEFAULT 0,
       error_rate REAL DEFAULT 0,
       enabled INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
+      updated_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z')
     )
   `);
 
@@ -192,8 +192,8 @@ function initSchema(db: Database) {
       name TEXT DEFAULT '',
       models TEXT DEFAULT '[]',
       enabled INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z'),
+      updated_at TEXT DEFAULT (replace(datetime('now'), ' ', 'T') || 'Z')
     )
   `);
 

@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import { useTranslation } from "../i18n";
 import type { User } from "../types";
 
+// Normalize SQLite UTC timestamps: old format lacks timezone, new format has Z suffix.
+function toUTC(ts: string): Date {
+  return new Date(ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
+}
+
 interface UserManagementProps {
   token: string;
   currentUser: User;
@@ -169,7 +174,7 @@ export default function UserManagement({ token, currentUser }: UserManagementPro
                     {user.role === "admin" ? t("role.admin") : t("role.user")}
                   </span>
                 </td>
-                <td className="mono">{user.created_at ? new Date(user.created_at).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "—"}</td>
+                <td className="mono">{user.created_at ? toUTC(user.created_at).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "—"}</td>
                 <td>
                   <button className="btn btn-sm" style={{ marginRight: "6px" }} onClick={() => handleEdit(user)}>
                     {t("users.edit")}

@@ -13,7 +13,7 @@ export const RETENTION_DAYS = Math.max(
 export function cleanupOldLogs(days = RETENTION_DAYS): number {
   const db = getDb();
   const result = db.run(
-    "DELETE FROM request_logs WHERE created_at < datetime('now', ?)",
+    "DELETE FROM request_logs WHERE created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
     [`-${days} days`]
   );
   return result.changes;
