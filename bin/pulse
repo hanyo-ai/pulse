@@ -151,24 +151,30 @@ switch (cmd) {
       break;
     }
 
-    // 3. Update — try bun first, then npm (handles CDN propagation lag)
+    // 3. Update — use npmjs.org directly to avoid mirror propagation lag.
+    //    We checked the latest version against npmjs.org, so install from there
+    //    too. If the user has a mirror configured (e.g. npmmirror.com) it may
+    //    be hours behind.
     console.log(`pulse: updating v${pkg.version} → v${latest}…`);
+    const registryArg = ["--registry", "https://registry.npmjs.org"];
     let installed = false;
     for (const pm of ["bun", "npm"]) {
       if (!Bun.which(pm)) continue;
-      const args = ["install", "-g", `${pkgName}@${latest}`];
-      // `bun install -g` maps to `bun add -g`, but it fails during CDN propagation
-      // lag — npm often works because it uses a different resolution path.
+      let args: string[];
+      if (pm === "bun") {
+        args = ["install", "-g", ...registryArg, `${pkgName}@${latest}`];
+      } else {
+        args = ["install", "-g", `${pkgName}@${latest}`, ...registryArg];
+      }
       const result = spawnSync(pm, args, { stdio: pm === "bun" ? "pipe" : "inherit" });
       if (result.status === 0) { installed = true; break; }
-      // If bun failed, print a short note and try npm
       if (pm === "bun" && Bun.which("npm")) {
-        console.log(`pulse: bun failed (CDN likely still syncing), falling back to npm…`);
+        console.log(`pulse: bun failed, falling back to npm…`);
       }
     }
     if (!installed) {
       console.error("pulse: update failed — try again in a few minutes, or run:");
-      console.error(`  npm install -g ${pkgName}@${latest}`);
+      console.error(`  npm install -g ${pkgName}@${latest} --registry https://registry.npmjs.org`);
       process.exit(1);
     }
     console.log(`\npulse: updated to v${latest}`);
