@@ -1,6 +1,6 @@
 {
   "name": "@hanyo_ai/pulse",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Self-hosted AI gateway — OpenAI- and Anthropic-compatible, with audit logs, live dashboards, and per-token cost tracking. Powered by Bun.",
   "private": false,
   "type": "module",
