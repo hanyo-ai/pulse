@@ -37,6 +37,14 @@ Watch agent conversations unfold live — `system` prompts, `user` messages, `as
 
 Requires [Bun](https://bun.sh) **>= 1.2**.
 
+**Install Bun** (if you don't have it yet):
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+> Already have Bun? Run `bun upgrade` to get the latest version.
+
 ### Install from npm (single-user / local)
 
 ```bash
