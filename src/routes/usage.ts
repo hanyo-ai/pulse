@@ -105,7 +105,7 @@ export const usageRoutes = new Elysia({ prefix: "/api/usage" })
         `
       SELECT date(created_at) as day, provider, COALESCE(SUM(tokens), 0) as tokens
       FROM request_logs rl
-      ${whereClause}${whereClause ? " AND" : " WHERE"} created_at >= datetime('now', '-7 days')
+      ${whereClause}${whereClause ? " AND" : " WHERE"} created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
       GROUP BY date(created_at), provider
       ORDER BY day ASC
     `

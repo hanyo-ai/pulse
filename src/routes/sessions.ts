@@ -83,7 +83,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     if (model) { fields.push("model = ?"); values.push(model); }
     if (status) { fields.push("status = ?"); values.push(status); }
     if (fields.length > 0) {
-      fields.push("updated_at = datetime('now')");
+      fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
       values.push(id);
       db.run(`UPDATE sessions SET ${fields.join(", ")} WHERE id = ?`, values);
     }
@@ -128,7 +128,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
       "INSERT INTO messages (session_id, role, content, tokens, latency) VALUES (?, ?, ?, ?, ?)",
       [id, role, content, tokens || 0, latency || "—"]
     );
-    db.run("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?", [id]);
+    db.run("UPDATE sessions SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [id]);
     notifySessionsChanged();
     notifyMessagesChanged(id);
     return db
@@ -142,7 +142,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
     const db = getDb();
     // Mark sessions as idle if they've been live for more than 5 minutes
     const staleResult = db.run(
-      "UPDATE sessions SET status = 'idle' WHERE status = 'live' AND updated_at < datetime('now', '-5 minutes')"
+      "UPDATE sessions SET status = 'idle' WHERE status = 'live' AND updated_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 minutes')"
     );
 
     if (staleResult.changes > 0) notifySessionsChanged();

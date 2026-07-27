@@ -250,7 +250,7 @@ function getOrCreateSession(endpointId: number, provider: string, model: string,
     const existing = db.query("SELECT id FROM sessions WHERE id = ? AND endpoint_id = ?").get(existingSessionId, endpointId) as { id: string } | null;
     if (existing) {
       const run = db.transaction(() => {
-        db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [existingSessionId]);
+        db.run("UPDATE sessions SET status = 'live', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [existingSessionId]);
         insertMessages(existingSessionId, messages);
       });
       run();
@@ -274,7 +274,7 @@ function getOrCreateSession(endpointId: number, provider: string, model: string,
 
     const matchAndAppend = db.transaction(() => {
       const candidates = db.query(
-        `SELECT id FROM sessions WHERE endpoint_id = ? AND provider = ? AND model = ? AND title = ? AND updated_at >= datetime('now', '-2 hours') ORDER BY updated_at DESC LIMIT 5`
+        `SELECT id FROM sessions WHERE endpoint_id = ? AND provider = ? AND model = ? AND title = ? AND updated_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 hours') ORDER BY updated_at DESC LIMIT 5`
       ).all(endpointId, provider, model, title) as { id: string }[];
 
       for (const candidate of candidates) {
@@ -312,7 +312,7 @@ function getOrCreateSession(endpointId: number, provider: string, model: string,
             const r = messages[cutoff]!.role;
             if (r === "user" || r === "assistant") uaSeen++;
           }
-          db.run("UPDATE sessions SET status = 'live', updated_at = datetime('now') WHERE id = ?", [candidate.id]);
+          db.run("UPDATE sessions SET status = 'live', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [candidate.id]);
           insertMessages(candidate.id, messages.slice(cutoff));
           return candidate.id;
         }
@@ -363,7 +363,7 @@ function finalizeSession(
   const cacheHit = (response.usage?.cache_read_input_tokens as number) || 0;
   const cacheMiss = (response.usage?.cache_creation_input_tokens as number) || 0;
   db.run(
-    "UPDATE sessions SET status = 'idle', tokens = tokens + ?, cache_hit_tokens = cache_hit_tokens + ?, cache_miss_tokens = cache_miss_tokens + ?, latency = ?, updated_at = datetime('now') WHERE id = ?",
+    "UPDATE sessions SET status = 'idle', tokens = tokens + ?, cache_hit_tokens = cache_hit_tokens + ?, cache_miss_tokens = cache_miss_tokens + ?, latency = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
     [totalTokens + cacheHit, cacheHit, cacheMiss, `${latencyMs}ms`, sessionId]
   );
   notifySessionsChanged();

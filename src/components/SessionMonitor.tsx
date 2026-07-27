@@ -88,7 +88,7 @@ function SessionBar({ sessions, activeSessionId, onSelect }: SessionBarProps) {
                 </div>
                 <span className="si-time">
                   {s.updated_at
-                    ? new Date(s.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                    ? parseTime(s.updated_at)?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                     : ""}
                 </span>
               </div>
@@ -385,13 +385,18 @@ interface ChatPanelProps {
   session: Session | null;
 }
 
+function parseTime(ts: string | undefined): Date | null {
+  if (!ts) return null;
+  // SQLite stores UTC timestamps. Old format: "2026-07-27 09:22:12" (no TZ).
+  // New format: "2026-07-27T09:22:12Z" (ISO with Z suffix).
+  // JavaScript parses tz-less strings as local time, so normalize to ISO.
+  const s = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z';
+  try { return new Date(s); } catch { return null; }
+}
+
 function formatTime(ts: string | undefined): string {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  } catch {
-    return "";
-  }
+  const d = parseTime(ts);
+  return d ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
 }
 
 function ChatPanel({ messages, session }: ChatPanelProps) {

@@ -40,7 +40,17 @@
 ### 从 npm 安装（单用户/本地）
 
 ```bash
+# npm
+npm install -g @hanyo_ai/pulse
+
+# bun
 bun install -g @hanyo_ai/pulse
+
+# yarn / pnpm
+yarn global add @hanyo_ai/pulse
+pnpm add -g @hanyo_ai/pulse
+
+# 然后运行
 pulse run
 ```
 

@@ -117,7 +117,7 @@ export const keysRoutes = new Elysia({ prefix: "/api/keys" })
       values.push(newKey);
     }
     if (sets.length > 0) {
-      sets.push("updated_at = datetime('now')");
+      sets.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
       values.push(Number(id));
       db.run(`UPDATE gateway_keys SET ${sets.join(", ")} WHERE id = ?`, values as (string | number)[]);
     }
