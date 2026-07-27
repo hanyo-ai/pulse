@@ -70,6 +70,12 @@ Update to the latest version anytime:
 pulse update
 ```
 
+Use a custom npm registry:
+
+```bash
+pulse update --registry https://registry.npmmirror.com
+```
+
 > **💡 For VPN / proxy updates:**
 > ```bash
 > HTTPS_PROXY=http://127.0.0.1:7890 pulse update
