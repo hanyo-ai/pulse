@@ -54,30 +54,29 @@ interface AddModalProps {
 }
 
 // ---- Provider presets ----
-// key convention: "A" = Anthropic-compatible API, "O" = OpenAI-compatible API
+// format: "openai" = OpenAI-compatible API, "anthropic" = Anthropic-compatible API
 interface ProviderPreset {
   id: string;
   label: string;
   provider_name: string;
-  provider_key: string;
+  provider_format: string;
   base_url: string;
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
-  { id: "kimi-code-oai",  label: "Kimi Code (OpenAI)",         provider_name: "kimi-code",    provider_key: "O", base_url: "https://api.kimi.com/coding/v1" },
-  { id: "kimi-code-ant",  label: "Kimi Code (Anthropic)",      provider_name: "kimi-code",    provider_key: "A", base_url: "https://api.kimi.com/coding/v1" },
-  { id: "deepseek-oai",   label: "DeepSeek (OpenAI)",         provider_name: "deepseek",     provider_key: "O", base_url: "https://api.deepseek.com" },
-  { id: "deepseek-ant",   label: "DeepSeek (Anthropic)",      provider_name: "deepseek",     provider_key: "A", base_url: "https://api.deepseek.com/anthropic" },
-  { id: "aicodemirror",   label: "AiCodeMirror (Anthropic)",  provider_name: "aicodemirror", provider_key: "A", base_url: "https://api.aicodemirror.com/api/claudecode/v1" },
-  { id: "openai",         label: "OpenAI",                    provider_name: "openai",       provider_key: "O", base_url: "https://api.openai.com/v1" },
-  { id: "anthropic",      label: "Anthropic",                 provider_name: "anthropic",    provider_key: "A", base_url: "https://api.anthropic.com" },
+  { id: "kimi-code-oai",  label: "Kimi Code (OpenAI)",         provider_name: "kimi-code",    provider_format: "openai",    base_url: "https://api.kimi.com/coding/v1" },
+  { id: "kimi-code-ant",  label: "Kimi Code (Anthropic)",      provider_name: "kimi-code",    provider_format: "anthropic", base_url: "https://api.kimi.com/coding/v1" },
+  { id: "deepseek-oai",   label: "DeepSeek (OpenAI)",         provider_name: "deepseek",     provider_format: "openai",    base_url: "https://api.deepseek.com" },
+  { id: "deepseek-ant",   label: "DeepSeek (Anthropic)",      provider_name: "deepseek",     provider_format: "anthropic", base_url: "https://api.deepseek.com/anthropic" },
+  { id: "aicodemirror",   label: "AiCodeMirror (Anthropic)",  provider_name: "aicodemirror", provider_format: "anthropic", base_url: "https://api.aicodemirror.com/api/claudecode/v1" },
+  { id: "openai",         label: "OpenAI",                    provider_name: "openai",       provider_format: "openai",    base_url: "https://api.openai.com/v1" },
+  { id: "anthropic",      label: "Anthropic",                 provider_name: "anthropic",    provider_format: "anthropic", base_url: "https://api.anthropic.com" },
 ];
 
 function AddModal({ onClose, onCreated, token }: AddModalProps) {
   const { t } = useTranslation();
   const [displayName, setDisplayName] = useState("");
-  const [providerName, setProviderName] = useState("");
-  const [providerKey, setProviderKey] = useState("");
+  const [providerFormat, setProviderFormat] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
   const [presetId, setPresetId] = useState("custom");
 
@@ -85,8 +84,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
     setPresetId(id);
     const preset = PROVIDER_PRESETS.find((p) => p.id === id);
     if (preset) {
-      setProviderName(preset.provider_name);
-      setProviderKey(preset.provider_key);
+      setProviderFormat(preset.provider_format);
       setEndpointUrl(preset.base_url);
     }
   };
@@ -162,8 +160,9 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
         },
         body: JSON.stringify({
           display_name: displayName,
-          provider_name: providerName,
-          provider_key: providerKey,
+          provider_name: displayName || providerFormat,
+          provider_format: providerFormat,
+          provider_key: providerFormat === "openai" ? "O" : providerFormat === "anthropic" ? "A" : "",
           endpoint_url: endpointUrl,
           model_name: modelName,
           models: JSON.stringify(modelsFromInput),
@@ -208,7 +207,7 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
               <h4 style={{ fontSize: "13px", fontWeight: 650, marginBottom: "12px" }}>{t("ep.externalInfo")}</h4>
 
               {[
-                { label: "Gateway Base URL", value: window.location.origin + "/v1", mono: true },
+                { label: "Gateway Base URL", value: window.location.origin + (createdEndpoint.provider_format === "anthropic" ? "/anthropic/v1" : "/v1"), mono: true },
                 { label: "Models", value: createdEndpoint.models
                     ? JSON.parse(createdEndpoint.models).join(", ")
                     : createdEndpoint.model_name || createdEndpoint.provider_name,
@@ -236,12 +235,22 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
                 background: "var(--surface-3)", fontSize: 12, color: "var(--muted)",
               }}>
                 <strong>{t("ep.curlExample")}</strong><br />
-                <code style={{ fontSize: "11px" }}>
-                  curl {window.location.origin}/v1/chat/completions \<br />
-                  &nbsp;&nbsp;-H "Authorization: Bearer &lt;your-api-key&gt;" \<br />
-                  &nbsp;&nbsp;-H "Content-Type: application/json" \<br />
-                  &nbsp;&nbsp;-d '{`{"model":"${createdEndpoint.model_name}","messages":[{"role":"user","content":"hello"}]}`}'
-                </code>
+                {createdEndpoint.provider_format === "anthropic" ? (
+                  <code style={{ fontSize: "11px" }}>
+                    curl {window.location.origin}/anthropic/v1/messages \<br />
+                    &nbsp;&nbsp;-H "x-api-key: &lt;your-api-key&gt;" \<br />
+                    &nbsp;&nbsp;-H "anthropic-version: 2023-06-01" \<br />
+                    &nbsp;&nbsp;-H "Content-Type: application/json" \<br />
+                    &nbsp;&nbsp;-d '{`{"model":"${createdEndpoint.model_name}","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`}'
+                  </code>
+                ) : (
+                  <code style={{ fontSize: "11px" }}>
+                    curl {window.location.origin}/v1/chat/completions \<br />
+                    &nbsp;&nbsp;-H "Authorization: Bearer &lt;your-api-key&gt;" \<br />
+                    &nbsp;&nbsp;-H "Content-Type: application/json" \<br />
+                    &nbsp;&nbsp;-d '{`{"model":"${createdEndpoint.model_name}","messages":[{"role":"user","content":"hello"}]}`}'
+                  </code>
+                )}
                 <div style={{ marginTop: "6px", fontSize: "11px" }}>
                   {t("ep.getKeyFromApiKeys")}
                 </div>
@@ -283,30 +292,19 @@ function AddModal({ onClose, onCreated, token }: AddModalProps) {
             />
           </div>
 
-          {/* Provider Name + Key in one row */}
-          <div style={{ display: "flex", gap: "10px" }}>
-            <div style={{ flex: 2 }}>
-              <label className="field-label">{t("ep.providerName")}</label>
-              <input
-                type="text"
-                placeholder={t("ep.providerKeyIdHint")}
-                value={providerName}
-                onChange={(e) => { setProviderName(e.target.value); setPresetId("custom"); }}
-                required
-                className="input"
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="field-label">{t("ep.providerKeyId")}</label>
-              <input
-                type="text"
-                placeholder={t("ep.providerKeyHint")}
-                value={providerKey}
-                onChange={(e) => { setProviderKey(e.target.value.toUpperCase().slice(0, 3)); setPresetId("custom"); }}
-                required
-                className="input"
-              />
-            </div>
+          {/* Provider Format */}
+          <div>
+            <label className="field-label">{t("ep.providerFormat")}</label>
+            <select
+              value={providerFormat}
+              onChange={(e) => { setProviderFormat(e.target.value); setPresetId("custom"); }}
+              required
+              className="input"
+            >
+              <option value="">{t("ep.providerFormatHint")}</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
           </div>
 
           {/* Base URL + API Key */}
@@ -668,8 +666,7 @@ interface EditModalProps {
 function EditModal({ endpoint, onClose, onSaved, token }: EditModalProps) {
   const { t } = useTranslation();
   const [displayName, setDisplayName] = useState(endpoint.display_name || "");
-  const [providerName, setProviderName] = useState(endpoint.provider_name || "");
-  const [providerKey, setProviderKey] = useState(endpoint.provider_key || "");
+  const [providerFormat, setProviderFormat] = useState(endpoint.provider_format || "");
   const [endpointUrl, setEndpointUrl] = useState(endpoint.endpoint_url || "");
   const [modelName, setModelName] = useState(endpoint.model_name || "");
   const parsedModels = (() => {
@@ -743,8 +740,9 @@ function EditModal({ endpoint, onClose, onSaved, token }: EditModalProps) {
 
       const payload: Record<string, unknown> = {
         display_name: displayName,
-        provider_name: providerName,
-        provider_key: providerKey,
+        provider_name: displayName || providerFormat,
+        provider_format: providerFormat,
+        provider_key: providerFormat === "openai" ? "O" : providerFormat === "anthropic" ? "A" : "",
         endpoint_url: endpointUrl,
         model_name: modelName,
         models: JSON.stringify(modelsFromInput),
@@ -797,15 +795,18 @@ function EditModal({ endpoint, onClose, onSaved, token }: EditModalProps) {
             <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required className="input" />
           </div>
 
-          <div style={{ display: "flex", gap: "10px" }}>
-            <div style={{ flex: 2 }}>
-              <label className="field-label">{t("ep.providerName")}</label>
-              <input type="text" value={providerName} onChange={(e) => setProviderName(e.target.value)} required className="input" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="field-label">{t("ep.providerKeyId")}</label>
-              <input type="text" value={providerKey} onChange={(e) => setProviderKey(e.target.value.toUpperCase().slice(0, 3))} required className="input" />
-            </div>
+          <div>
+            <label className="field-label">{t("ep.providerFormat")}</label>
+            <select
+              value={providerFormat}
+              onChange={(e) => setProviderFormat(e.target.value)}
+              required
+              className="input"
+            >
+              <option value="">{t("ep.providerFormatHint")}</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
           </div>
 
           <div>
@@ -1014,10 +1015,16 @@ export function Endpoints({ token }: { token: string }) {
     }
   };
 
-  const providerColor = (key: string) => {
-    if (key === "OA") return "#10a37f";
-    if (key === "AN") return "#d97757";
+  const providerColor = (format: string) => {
+    if (format === "openai") return "#10a37f";
+    if (format === "anthropic") return "#d97757";
     return "var(--accent)";
+  };
+
+  const formatLabel = (format: string) => {
+    if (format === "openai") return "OA";
+    if (format === "anthropic") return "AN";
+    return format?.slice(0, 2).toUpperCase() || "??";
   };
 
   return (
@@ -1078,12 +1085,12 @@ export function Endpoints({ token }: { token: string }) {
                         fontWeight: 700,
                         fontSize: "10px",
                         flexShrink: 0,
-                        background: providerColor(ep.provider_key),
+                        background: providerColor(ep.provider_format),
                       }}
                     >
-                      {ep.provider_key}
+                      {formatLabel(ep.provider_format)}
                     </span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ep.provider_name}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", textTransform: "capitalize" }}>{ep.provider_format || ep.provider_name}</span>
                   </div>
                 </td>
                 <td

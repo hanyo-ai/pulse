@@ -13,7 +13,7 @@ interface KeyRow {
 }
 
 function genKey(): string {
-  return "sgw_" + Array.from({ length: 24 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
+  return "sk-pulse-" + Array.from({ length: 24 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
 }
 
 function maskKey(key: string): string {

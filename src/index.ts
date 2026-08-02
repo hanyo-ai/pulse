@@ -17,7 +17,7 @@ getDb();
 startLogRetentionLoop();
 
 // ── Constants ──
-const UPSTREAM_TIMEOUT_MS = 120_000;
+const UPSTREAM_TIMEOUT_MS = 15_000;
 
 // ── Fetch with timeout ──
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<Response> {
@@ -56,6 +56,7 @@ interface EndpointRow {
   model_name: string;
   models: string;
   provider_name: string;
+  provider_format: string;
   price_input_per_m: number;
   price_output_per_m: number;
   price_cache_input_per_m: number;
@@ -90,7 +91,7 @@ interface GatewayKeyRow {
 }
 
 const EP_COLS =
-  "id, endpoint_url, api_key, model_name, models, provider_name, price_input_per_m, price_output_per_m, price_cache_input_per_m";
+  "id, endpoint_url, api_key, model_name, models, provider_name, provider_format, price_input_per_m, price_output_per_m, price_cache_input_per_m";
 
 // ── Gateway resolution ──
 // Two phases:
@@ -101,7 +102,7 @@ type LookupResult =
   | { ok: true; ep: EndpointRow }
   | { ok: false; status: number; error: string };
 
-function resolveGateway(gatewayKey: string, requestedModel?: string): LookupResult {
+function resolveGateway(gatewayKey: string, requestedModel?: string, providerFormat?: string): LookupResult {
   if (!gatewayKey) return { ok: false, status: 401, error: "Invalid or disabled API key" };
   const db = getDb();
 
@@ -120,7 +121,8 @@ function resolveGateway(gatewayKey: string, requestedModel?: string): LookupResu
     return { ok: false, status: 403, error: `Model "${requestedModel}" not allowed for this API key` };
   }
 
-  // Phase 2: route to an endpoint declaring the requested model
+  // Phase 2: route to an endpoint declaring the requested model,
+  // optionally narrowed by the gateway route's provider format.
   const endpoints = db.query(`SELECT ${EP_COLS} FROM endpoints WHERE enabled = 1`).all() as EndpointRow[];
   let candidates = endpoints;
   if (requestedModel) {
@@ -136,18 +138,23 @@ function resolveGateway(gatewayKey: string, requestedModel?: string): LookupResu
       return effective.some((m) => whitelist.includes(m));
     });
   }
+  // Narrow by provider format when the gateway route implies one
+  if (providerFormat) {
+    candidates = candidates.filter((ep) => ep.provider_format === providerFormat);
+  }
 
   if (candidates.length === 1) return { ok: true, ep: candidates[0]! };
   if (candidates.length === 0) {
     return { ok: false, status: 400, error: requestedModel
-      ? `No enabled endpoint serves model "${requestedModel}"`
+      ? `No enabled ${providerFormat || ""} endpoint serves model "${requestedModel}"`
       : "No enabled endpoint available" };
   }
   return { ok: false, status: 400, error: `Model "${requestedModel ?? ""}" is ambiguous across ${candidates.length} endpoints` };
 }
 
 // Aggregate view for GET /v1/models: every model this key may see.
-function listModelsForKey(gatewayKey: string): string[] | null {
+// Optional format narrows to endpoints of that provider format.
+function listModelsForKey(gatewayKey: string, format?: string): string[] | null {
   const db = getDb();
   const keyRow = db.query("SELECT models, enabled FROM gateway_keys WHERE key = ?").get(gatewayKey) as
     { models: string; enabled: number } | null;
@@ -159,6 +166,7 @@ function listModelsForKey(gatewayKey: string): string[] | null {
 
   const out = new Set<string>();
   for (const ep of endpoints) {
+    if (format && ep.provider_format !== format) continue;
     const models = parseModels(ep.models);
     const effective = models.length > 0 ? models : (ep.model_name ? [ep.model_name] : []);
     for (const m of effective) {
@@ -414,7 +422,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   try { body = await request.json() as Record<string, unknown>; }
   catch { set.status = 400; return { error: "Invalid JSON body" }; }
 
-  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined);
+  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined, "openai");
   if (!epResult.ok) { set.status = epResult.status; return { error: epResult.error }; }
   const ep = epResult.ep;
 
@@ -582,7 +590,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   try { body = await request.json() as Record<string, unknown>; }
   catch { set.status = 400; return { error: "Invalid JSON body" }; }
 
-  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined);
+  const epResult = resolveGateway(gatewayKey, typeof body.model === "string" ? body.model : undefined, "anthropic");
   if (!epResult.ok) { set.status = epResult.status; return { error: epResult.error }; }
   const ep = epResult.ep;
 
@@ -794,6 +802,30 @@ const app = new Elysia()
       request.headers.get("x-api-key") ||
       (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
     const modelIds = listModelsForKey(gatewayKey);
+    if (!modelIds) {
+      set.status = 401;
+      return { error: "Invalid or disabled API key" };
+    }
+    const data = modelIds.map((id) => ({
+      id,
+      type: "model",
+      created_at: "2024-01-01T00:00:00Z",
+      display_name: id,
+    }));
+    return {
+      data,
+      has_more: false,
+      first_id: data[0]?.id || "",
+      last_id: data[data.length - 1]?.id || "",
+    };
+  })
+  // GET /anthropic/v1/models - List models served by Anthropic-format endpoints only
+  .get("/anthropic/v1/models", ({ request, set }) => {
+    // Accept both auth styles: Anthropic SDKs send x-api-key, OpenAI SDKs send Bearer.
+    const gatewayKey =
+      request.headers.get("x-api-key") ||
+      (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    const modelIds = listModelsForKey(gatewayKey, "anthropic");
     if (!modelIds) {
       set.status = 401;
       return { error: "Invalid or disabled API key" };
