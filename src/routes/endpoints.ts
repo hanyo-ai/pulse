@@ -53,10 +53,10 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     if (result instanceof Response) return result;
 
     const db = getDb();
-    const { display_name, provider_name, provider_key, endpoint_url, model_name, models, api_key,
+    const { display_name, provider_name, provider_format, provider_key, endpoint_url, model_name, models, api_key,
       price_input_per_m, price_output_per_m, price_cache_input_per_m } =
       body as {
-        display_name: string; provider_name: string; provider_key: string;
+        display_name: string; provider_name: string; provider_format?: string; provider_key: string;
         endpoint_url: string; model_name: string; models?: string; api_key: string;
         price_input_per_m?: number; price_output_per_m?: number;
         price_cache_input_per_m?: number;
@@ -70,14 +70,16 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     // Normalize models: if only model_name provided, populate models automatically
     const modelsJson = models || (model_name ? JSON.stringify([model_name]) : '[]');
 
-    // Validate: ensure no duplicate model names across endpoints
+    // Validate: ensure no duplicate model names on the same provider
     try {
       const newModels = JSON.parse(modelsJson) as string[];
       if (newModels.length > 0) {
-        const existing = db.query("SELECT id, display_name, models FROM endpoints WHERE enabled = 1").all() as Array<{id: number; display_name: string; models: string}>;
+        const existing = db.query("SELECT id, display_name, provider_format, models FROM endpoints WHERE enabled = 1").all() as Array<{id: number; display_name: string; provider_format: string; models: string}>;
         const conflicts: string[] = [];
         for (const row of existing) {
           try {
+            // only conflict if same provider_format
+            if (row.provider_format && provider_format && row.provider_format !== provider_format) continue;
             const existingModels = JSON.parse(row.models) as string[];
             for (const m of newModels) {
               if (existingModels.includes(m)) {
@@ -94,10 +96,10 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
     } catch { /* skip validation if models is not valid JSON */ }
 
     db.run(
-      `INSERT INTO endpoints (display_name, provider_name, provider_key, endpoint_url, model_name, models, api_key,
+      `INSERT INTO endpoints (display_name, provider_name, provider_format, provider_key, endpoint_url, model_name, models, api_key,
         price_input_per_m, price_output_per_m, price_cache_input_per_m)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [display_name || provider_name, provider_name, provider_key, endpoint_url, model_name, modelsJson, api_key,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [display_name || provider_name, provider_name, provider_format || "openai", provider_key, endpoint_url, model_name, modelsJson, api_key,
         price_input_per_m || 0, price_output_per_m || 0, price_cache_input_per_m || 0]
     );
     const row = db.query("SELECT * FROM endpoints ORDER BY id DESC LIMIT 1").get() as EndpointRow;
@@ -123,16 +125,19 @@ export const endpointsRoutes = new Elysia({ prefix: "/api/endpoints" })
       }
     }
     if (setClauses.length > 0) {
-      // Validate: ensure no duplicate model names when updating models field
+      // Validate: ensure no duplicate model names on the same provider when updating models field
       const newModelsJson = fields["models"] as string | undefined;
       if (newModelsJson) {
         try {
           const newModels = JSON.parse(newModelsJson) as string[];
           if (newModels.length > 0) {
-            const existing = db.query("SELECT id, display_name, models FROM endpoints WHERE enabled = 1 AND id != ?").all(Number(id)) as Array<{id: number; display_name: string; models: string}>;
+            const existing = db.query("SELECT id, display_name, provider_format, models FROM endpoints WHERE enabled = 1 AND id != ?").all(Number(id)) as Array<{id: number; display_name: string; provider_format: string; models: string}>;
+            const currentFormat = (fields["provider_format"] as string) || "";
             const conflicts: string[] = [];
             for (const row of existing) {
               try {
+                // only conflict if same provider_format
+                if (row.provider_format && currentFormat && row.provider_format !== currentFormat) continue;
                 const existingModels = JSON.parse(row.models) as string[];
                 for (const m of newModels) {
                   if (existingModels.includes(m)) {

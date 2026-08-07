@@ -53,6 +53,8 @@ npm install -g @hanyo_ai/pulse
 
 # bun
 bun install -g @hanyo_ai/pulse
+or
+bun install -g @hanyo_ai/pulse  --registry https://registry.npmjs.org
 
 # yarn / pnpm
 yarn global add @hanyo_ai/pulse
@@ -68,6 +70,12 @@ Update to the latest version anytime:
 
 ```bash
 pulse update
+```
+
+Use a custom npm registry:
+
+```bash
+pulse update --registry https://registry.npmmirror.com
 ```
 
 > **💡 For VPN / proxy updates:**

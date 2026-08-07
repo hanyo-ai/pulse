@@ -26,6 +26,7 @@ const { values, positionals } = parseArgs({
     host:      { type: "string",  short: "H" },
     "db-path": { type: "string",  short: "d" },
     auth:      { type: "boolean" },                  // opt back into login page
+    registry:  { type: "string" },                   // npm registry for update
     help:      { type: "boolean", short: "h" },
     version:   { type: "boolean", short: "v" },
   },
@@ -129,12 +130,14 @@ switch (cmd) {
 
   case "update": {
     const pkgName = "@hanyo_ai/pulse";
-    console.log("pulse: checking for updates…");
+    const registry = values.registry || "https://registry.npmjs.org";
+    const registryBase = registry.replace(/\/+$/, "");
+    console.log(`pulse: checking for updates… (${registryBase})`);
 
     // 1. Fetch latest version from npm registry
     let latest: string;
     try {
-      const res = await fetch(`https://registry.npmjs.org/${pkgName}/latest`, {
+      const res = await fetch(`${registryBase}/${pkgName}/latest`, {
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -153,13 +156,24 @@ switch (cmd) {
 
     // 3. Update — prefer bun, fall back to npm
     console.log(`pulse: updating v${pkg.version} → v${latest}…`);
-    const pm = Bun.which("bun") ? "bun" : "npm";
-    const args = pm === "bun"
-      ? ["install", "-g", `${pkgName}@${latest}`]
-      : ["install", "-g", `${pkgName}@${latest}`];
-    const result = spawnSync(pm, args, { stdio: "inherit" });
-    if (result.status !== 0) {
-      console.error("pulse: update failed");
+    let installed = false;
+    for (const pm of ["bun", "npm"]) {
+      if (!Bun.which(pm)) continue;
+      let args: string[];
+      if (pm === "bun") {
+        args = ["install", "-g", `--registry=${registryBase}`, `${pkgName}@${latest}`];
+      } else {
+        args = ["install", "-g", `${pkgName}@${latest}`, "--registry", registryBase];
+      }
+      const result = spawnSync(pm, args, { stdio: pm === "bun" ? "pipe" : "inherit" });
+      if (result.status === 0) { installed = true; break; }
+      if (pm === "bun" && Bun.which("npm")) {
+        console.log(`pulse: bun failed, falling back to npm…`);
+      }
+    }
+    if (!installed) {
+      console.error("pulse: update failed — try again in a few minutes, or run:");
+      console.error(`  npm install -g ${pkgName}@${latest} --registry ${registryBase}`);
       process.exit(1);
     }
     console.log(`\npulse: updated to v${latest}`);

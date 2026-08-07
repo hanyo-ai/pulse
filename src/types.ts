@@ -79,6 +79,7 @@ export interface Endpoint {
   display_name: string;
   provider_name: string;
   provider_key: string;
+  provider_format: string;
   endpoint_url: string;
   model_name: string;
   /** JSON array of model names this endpoint supports, e.g. ["gpt-4o","gpt-4o-mini"] */
