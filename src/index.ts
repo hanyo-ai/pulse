@@ -766,6 +766,30 @@ if (!isProduction) {
 }
 
 const app = new Elysia()
+  // ── CORS: allow browser clients (taus-office web app) to call the gateway ──
+  .onRequest(({ request, set }) => {
+    const origin = request.headers.get("origin");
+    const allowOrigin = origin || "*";
+    set.headers["Access-Control-Allow-Origin"] = allowOrigin;
+    set.headers["Vary"] = origin ? "Origin" : "*";
+    set.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
+    set.headers["Access-Control-Allow-Headers"] =
+      "Authorization, Content-Type, x-api-key, X-Session-Id";
+    set.headers["Access-Control-Expose-Headers"] = "X-Session-Id";
+    set.headers["Access-Control-Max-Age"] = "86400";
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": allowOrigin,
+          "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+          "Access-Control-Allow-Headers":
+            "Authorization, Content-Type, x-api-key, X-Session-Id",
+          "Access-Control-Max-Age": "86400",
+        },
+      });
+    }
+  })
   // API routes first (matched before catch-all)
   .use(sessionsRoutes)
   .use(logsRoutes)
