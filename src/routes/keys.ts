@@ -53,7 +53,9 @@ export const keysRoutes = new Elysia({ prefix: "/api/keys" })
     if (result instanceof Response) return result;
     const db = getDb();
     const rows = db.query("SELECT * FROM gateway_keys ORDER BY id ASC").all() as KeyRow[];
-    // Return full key for admin (they need to copy it)
+    // Return full key for admin (they need to copy it to configure clients
+    // / test endpoints). The gateway key is a client credential for the
+    // gateway itself, not an upstream secret — masking it breaks copying.
     return rows.map((r) => ({ ...toKey(r), key: r.key }));
   })
   .post("/", ({ body, headers, set }) => {
