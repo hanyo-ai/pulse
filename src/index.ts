@@ -13,7 +13,8 @@ import index from "./index.html";
 // Initialize database on startup
 getDb();
 
-// Start daily pruning of request_logs (PULSE_LOG_RETENTION_DAYS, default 7)
+// Start daily pruning of request_logs and old sessions
+// (default 3 days each; PULSE_LOG_RETENTION_DAYS / PULSE_SESSION_RETENTION_DAYS)
 startLogRetentionLoop();
 
 // ── Constants ──
@@ -243,6 +244,32 @@ function serializeIncomingMessage(m: BodyMessage): { role: string; text: string 
   return { role: m.role, text };
 }
 
+// If the client aborted a tool call mid-flight (ESC / disconnect), the conversation
+// history ends up with an assistant message carrying tool_calls but no matching tool
+// response. Every OpenAI-compatible API rejects this with 400. Repair by injecting
+// synthetic "cancelled" tool results for any orphan tool_call_id.
+function repairOrphanToolCalls(messages: BodyMessage[]): BodyMessage[] {
+  const respondedIds = new Set<string>();
+  for (const m of messages) {
+    if ((m.role === "tool" || m.role === "function") && m.tool_call_id) respondedIds.add(m.tool_call_id);
+  }
+  const out: BodyMessage[] = [];
+  let repaired = 0;
+  for (const m of messages) {
+    out.push(m);
+    if (m.role === "assistant" && m.tool_calls?.length) {
+      for (const tc of m.tool_calls) {
+        if (tc.id && !respondedIds.has(tc.id)) {
+          out.push({ role: "tool", tool_call_id: tc.id, content: "[tool call cancelled by user]" });
+          repaired++;
+        }
+      }
+    }
+  }
+  if (repaired > 0) console.warn(`🔧 Repaired ${repaired} orphan tool_call(s) (client aborted before tool result)`);
+  return out;
+}
+
 function getOrCreateSession(endpointId: number, provider: string, model: string, messages: BodyMessage[], systemPrompt: string | undefined, existingSessionId?: string): string {
   const db = getDb();
 
@@ -439,7 +466,7 @@ async function proxyOpenAI(gatewayKey: string, request: Request, set: { status: 
   }
   const start = Date.now();
   const isStream = !!body.stream;
-  const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
+  const reqMessages = repairOrphanToolCalls((body.messages as BodyMessage[] | undefined) || []);
   const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
@@ -606,7 +633,7 @@ async function proxyAnthropic(gatewayKey: string, request: Request, set: { statu
   }
   const start = Date.now();
   const isStream = !!body.stream;
-  const reqMessages = (body.messages as BodyMessage[] | undefined) || [];
+  const reqMessages = repairOrphanToolCalls((body.messages as BodyMessage[] | undefined) || []);
   const systemPrompt = normalizeSystem(body.system);
   const existingSessionId = request.headers.get("x-session-id") || undefined;
   const sessionId = getOrCreateSession(ep.id, ep.provider_name || baseUrl, model, reqMessages, systemPrompt, existingSessionId);
@@ -945,6 +972,7 @@ if (isProduction) {
   Bun.serve({
     port: PORT,
     hostname: HOST,
+    idleTimeout: 0, // disable 10s default — SSE streaming responses stay idle while the model thinks
     websocket: {
       open(ws) { if (ws.data.kind === "app") wsRegister(ws); },
       close(ws) { if (ws.data.kind === "app") wsUnregister(ws); },
@@ -962,6 +990,7 @@ if (isProduction) {
   // === Dev: Bun.serve with HMR proxy ===
   Bun.serve({
     port: PORT,
+    idleTimeout: 0, // disable 10s default — long-running LLM streams must not be killed
     websocket: {
       open(ws) {
         const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
