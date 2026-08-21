@@ -25,9 +25,12 @@ function maskKey(key: string): string {
 }
 
 function toEndpoint(row: EndpointRow) {
+  // Never leak the real upstream API key to the frontend:
+  // strip it from the response and only expose the masked form.
+  const { api_key, ...safe } = row;
   return {
-    ...row,
-    api_key_masked: maskKey(row.api_key),
+    ...safe,
+    api_key_masked: maskKey(api_key),
   };
 }
 
