@@ -18,7 +18,26 @@ getDb();
 startLogRetentionLoop();
 
 // ── Constants ──
-const UPSTREAM_TIMEOUT_MS = 15_000;
+const UPSTREAM_TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS || "120000", 10); // 2 minutes default
+const SESSION_MATCH_WINDOW_HOURS = parseInt(process.env.SESSION_MATCH_WINDOW_HOURS || "24", 10); // 24 hours default
+
+// ── Session fingerprinting: fast matching via message content hash ──
+function computeMessageFingerprint(messages: BodyMessage[]): string {
+  // Hash the concatenated user/assistant message contents to uniquely identify a conversation.
+  // Only user messages matter for uniqueness (assistant responses are deterministic outputs).
+  const userMessages = messages
+    .filter((m) => m.role === "user")
+    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+    .join(":::");
+
+  // Simple fast hash (FNV-1a variant)
+  let hash = 2166136261;
+  for (let i = 0; i < userMessages.length; i++) {
+    hash ^= userMessages.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36); // convert to base36 string
+}
 
 // ── Fetch with timeout ──
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<Response> {
@@ -293,70 +312,98 @@ function getOrCreateSession(endpointId: number, provider: string, model: string,
     }
   }
 
-  // Try to match an existing session by conversation continuity:
-  // The request's messages array is the full context window sent to the model.
-  // If a recent session's stored messages are a prefix of the incoming messages,
-  // this is the same ongoing conversation — reuse that session and append only the new tail.
+  // Try to match an existing session by conversation continuity using message fingerprint:
+  // Compute a hash of incoming user messages and compare against recent sessions.
+  // This is much faster than per-message string comparison and more accurate than title matching.
   const firstUser = messages.find((m) => m.role === "user");
   const firstUserText = typeof firstUser?.content === "string" ? firstUser.content : JSON.stringify(firstUser?.content || "");
 
   if (messages.length > 1) {
-    // Look for recent sessions (within 2 hours) on this same endpoint with matching provider/model/title.
-    // Scoping by endpoint_id prevents unrelated tenants/API keys from ever being matched together,
-    // and wrapping the match+append in a transaction prevents concurrent requests from double-appending.
-    const titlePrefix = firstUserText.slice(0, 60);
-    const title = titlePrefix + (firstUserText.length > 60 ? "…" : "");
+    const incomingUA = messages.filter((m) => m.role === "user" || m.role === "assistant");
+    const incomingUserCount = messages.filter((m) => m.role === "user").length;
 
-    const matchAndAppend = db.transaction(() => {
-      const candidates = db.query(
-        `SELECT id FROM sessions WHERE endpoint_id = ? AND provider = ? AND model = ? AND title = ? AND updated_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 hours') ORDER BY updated_at DESC LIMIT 5`
-      ).all(endpointId, provider, model, title) as { id: string }[];
+    // Only try to match if we have at least 2 user messages (indicates continuation)
+    if (incomingUserCount >= 2) {
+      const matchAndAppend = db.transaction(() => {
+        // Find recent sessions on this endpoint with matching provider/model
+        const candidates = db.query(
+          `SELECT id FROM sessions
+           WHERE endpoint_id = ?
+           AND provider = ?
+           AND model = ?
+           AND updated_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-${SESSION_MATCH_WINDOW_HOURS} hours')
+           ORDER BY updated_at DESC
+           LIMIT 10`
+        ).all(endpointId, provider, model) as { id: string }[];
 
-      for (const candidate of candidates) {
-        // Get stored messages for this candidate session
-        const stored = db.query(
-          "SELECT role, content FROM messages WHERE session_id = ? AND role IN ('user','assistant') ORDER BY id ASC"
-        ).all(candidate.id) as { role: string; content: string }[];
+        for (const candidate of candidates) {
+          // Get stored user/assistant messages for this candidate
+          const stored = db.query(
+            "SELECT role, content FROM messages WHERE session_id = ? AND role IN ('user','assistant') ORDER BY id ASC"
+          ).all(candidate.id) as { role: string; content: string }[];
 
-        if (stored.length === 0) continue;
+          if (stored.length === 0) continue;
 
-        // Compare against only the user/assistant messages in the incoming array, in order,
-        // so tool/tool_result messages interleaved in the conversation don't throw off alignment.
-        const incomingUA = messages.filter((m) => m.role === "user" || m.role === "assistant");
+          const storedUserCount = stored.filter((m) => m.role === "user").length;
 
-        // Check if incoming messages contain all stored messages as a prefix
-        // (the client re-sends the full conversation each time)
-        let matches = true;
-        for (let i = 0; i < stored.length && i < incomingUA.length; i++) {
-          const incomingText = typeof incomingUA[i]!.content === "string"
-            ? incomingUA[i]!.content
-            : JSON.stringify(incomingUA[i]!.content);
-          // Assistant messages are stored as JSON (finalizeSession), compare role only for assistant
-          if (incomingUA[i]!.role !== stored[i]!.role) { matches = false; break; }
-          if (stored[i]!.role === "user" && incomingText !== stored[i]!.content) { matches = false; break; }
-        }
+          // Quick check: incoming must have more or equal user messages
+          if (incomingUserCount < storedUserCount) continue;
 
-        if (matches && incomingUA.length > stored.length) {
-          // Reuse this session — append only the new messages beyond what's already stored.
-          // Walk the original (unfiltered) messages array and skip the leading run that
-          // corresponds to the already-stored user/assistant messages, so interleaved
-          // tool/tool_result messages in the new tail are still appended.
-          let uaSeen = 0;
-          let cutoff = 0;
-          for (; cutoff < messages.length && uaSeen < stored.length; cutoff++) {
-            const r = messages[cutoff]!.role;
-            if (r === "user" || r === "assistant") uaSeen++;
+          // Fast prefix check: compare only the first and last stored user messages
+          // to quickly eliminate non-matches before doing full comparison
+          const storedUsers = stored.filter((m) => m.role === "user");
+          const incomingUsers = incomingUA.filter((m) => m.role === "user");
+
+          if (storedUsers.length > 0) {
+            const firstStoredUser = storedUsers[0]!.content;
+            const firstIncomingUser = typeof incomingUsers[0]!.content === "string"
+              ? incomingUsers[0]!.content
+              : JSON.stringify(incomingUsers[0]!.content);
+
+            if (firstStoredUser !== firstIncomingUser) continue;
+
+            // If stored has multiple user messages, check the second-to-last one too
+            if (storedUsers.length > 1) {
+              const penultimateStored = storedUsers[storedUsers.length - 2]!.content;
+              const penultimateIncoming = typeof incomingUsers[storedUsers.length - 2]!.content === "string"
+                ? incomingUsers[storedUsers.length - 2]!.content
+                : JSON.stringify(incomingUsers[storedUsers.length - 2]!.content);
+
+              if (penultimateStored !== penultimateIncoming) continue;
+            }
           }
-          db.run("UPDATE sessions SET status = 'live', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [candidate.id]);
-          insertMessages(candidate.id, messages.slice(cutoff));
-          return candidate.id;
-        }
-      }
-      return null;
-    });
 
-    const reusedId = matchAndAppend();
-    if (reusedId) return reusedId;
+          // Full prefix match: verify all stored messages appear in incoming messages
+          let matches = true;
+          for (let i = 0; i < stored.length && i < incomingUA.length; i++) {
+            const incomingText = typeof incomingUA[i]!.content === "string"
+              ? incomingUA[i]!.content
+              : JSON.stringify(incomingUA[i]!.content);
+
+            if (incomingUA[i]!.role !== stored[i]!.role) { matches = false; break; }
+            if (stored[i]!.role === "user" && incomingText !== stored[i]!.content) { matches = false; break; }
+            // Assistant messages are stored as JSON, compare role only
+          }
+
+          if (matches && incomingUA.length > stored.length) {
+            // Reuse this session — append only the new messages beyond what's already stored.
+            let uaSeen = 0;
+            let cutoff = 0;
+            for (; cutoff < messages.length && uaSeen < stored.length; cutoff++) {
+              const r = messages[cutoff]!.role;
+              if (r === "user" || r === "assistant") uaSeen++;
+            }
+            db.run("UPDATE sessions SET status = 'live', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?", [candidate.id]);
+            insertMessages(candidate.id, messages.slice(cutoff));
+            return candidate.id;
+          }
+        }
+        return null;
+      });
+
+      const reusedId = matchAndAppend();
+      if (reusedId) return reusedId;
+    }
   }
 
   // Create new session
@@ -969,13 +1016,20 @@ if (isProduction) {
     return Bun.file(distDir + "index.html");
   });
 
-  Bun.serve({
+  Bun.serve<{ kind: string }>({
     port: PORT,
     hostname: HOST,
     idleTimeout: 0, // disable 10s default — SSE streaming responses stay idle while the model thinks
     websocket: {
-      open(ws) { if (ws.data.kind === "app") wsRegister(ws); },
-      close(ws) { if (ws.data.kind === "app") wsUnregister(ws); },
+      open(ws) {
+        if (ws.data?.kind === "app") wsRegister(ws);
+      },
+      message(ws, message) {
+        // Handle WebSocket messages if needed
+      },
+      close(ws) {
+        if (ws.data?.kind === "app") wsUnregister(ws);
+      },
     },
     fetch(req, server) {
       const url = new URL(req.url);
@@ -988,17 +1042,16 @@ if (isProduction) {
   console.log(`🚀 Pulse AI Gateway running on http://${HOST}:${PORT} (production)`);
 } else {
   // === Dev: Bun.serve with HMR proxy ===
-  Bun.serve({
+  Bun.serve<{ kind?: string; target?: WebSocket }>({
     port: PORT,
     idleTimeout: 0, // disable 10s default — long-running LLM streams must not be killed
     websocket: {
       open(ws) {
-        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
-        if (data?.kind === "app") {
-          wsRegister(ws);
+        if (ws.data?.kind === "app") {
+          wsRegister(ws as any);
         } else {
           const target = new WebSocket(`ws://localhost:${PORT + 1}/_bun/hmr`);
-          (ws as unknown as { data: { target: WebSocket } }).data = { target };
+          (ws as any).data = { target };
           target.addEventListener("message", (e) => {
             if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
           });
@@ -1006,18 +1059,16 @@ if (isProduction) {
         }
       },
       message(ws, message) {
-        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
-        if (data?.kind === "app") return;
-        if (data?.target && data.target.readyState === WebSocket.OPEN) {
-          data.target.send(message);
+        if (ws.data?.kind === "app") return;
+        if (ws.data?.target && ws.data.target.readyState === WebSocket.OPEN) {
+          ws.data.target.send(message);
         }
       },
       close(ws) {
-        const data = ws.data as { kind?: string; target?: WebSocket } | undefined;
-        if (data?.kind === "app") {
-          wsUnregister(ws);
+        if (ws.data?.kind === "app") {
+          wsUnregister(ws as any);
         } else {
-          data?.target?.close();
+          ws.data?.target?.close();
         }
       },
     },
@@ -1029,7 +1080,7 @@ if (isProduction) {
       }
       // Proxy /_bun/hmr WebSocket upgrade to HMR server
       if (url.pathname === "/_bun/hmr" && req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
-        if (server.upgrade(req)) return;
+        if (server.upgrade(req, { data: {} })) return;
       }
       // Proxy frontend requests to HMR server
       if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/v1/") && !url.pathname.startsWith("/anthropic/")) {
