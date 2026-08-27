@@ -77,7 +77,7 @@ export const sessionsRoutes = new Elysia({ prefix: "/api/sessions" })
 
     const { title, provider, model, status } = body as Record<string, string>;
     const fields: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number)[] = [];
     if (title) { fields.push("title = ?"); values.push(title); }
     if (provider) { fields.push("provider = ?"); values.push(provider); }
     if (model) { fields.push("model = ?"); values.push(model); }

@@ -11,7 +11,7 @@ export const usageRoutes = new Elysia({ prefix: "/api/usage" })
     const { period } = query as { period?: string };
 
     let whereClause = "";
-    const params: unknown[] = [];
+    const params: (string | number)[] = [];
     if (result.user.role !== "admin") {
       whereClause =
         " WHERE rl.session_id IN (SELECT id FROM sessions WHERE user_id = ?)";
@@ -69,7 +69,7 @@ export const usageRoutes = new Elysia({ prefix: "/api/usage" })
 
     const db = getDb();
     let whereClause = "";
-    const params: unknown[] = [];
+    const params: (string | number)[] = [];
     if (result.user.role !== "admin") {
       whereClause = " WHERE rl.session_id IN (SELECT id FROM sessions WHERE user_id = ?)";
       params.push(result.user.id);
@@ -94,7 +94,7 @@ export const usageRoutes = new Elysia({ prefix: "/api/usage" })
 
     const db = getDb();
     let whereClause = "";
-    const params: unknown[] = [];
+    const params: (string | number)[] = [];
     if (result.user.role !== "admin") {
       whereClause = " WHERE rl.session_id IN (SELECT id FROM sessions WHERE user_id = ?)";
       params.push(result.user.id);

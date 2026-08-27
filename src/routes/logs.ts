@@ -20,7 +20,7 @@ export const logsRoutes = new Elysia({ prefix: "/api/logs" })
 
     // Build the WHERE clause once, then reuse for COUNT and SELECT
     let whereClause = " WHERE 1=1";
-    const params: unknown[] = [];
+    const params: (string | number)[] = [];
 
     if (result.user.role !== "admin") {
       whereClause = " INNER JOIN sessions s ON rl.session_id = s.id AND s.user_id = ? WHERE 1=1";
@@ -47,7 +47,7 @@ export const logsRoutes = new Elysia({ prefix: "/api/logs" })
 
     // Data query
     const dataSql = `SELECT rl.* FROM request_logs rl${whereClause} ORDER BY rl.created_at DESC LIMIT ? OFFSET ?`;
-    const logs = db.query(dataSql).all(...params, pageSize, pageOffset);
+    const logs = db.query(dataSql).all(...[...params, pageSize, pageOffset]);
 
     return { logs, total, page: Math.floor(pageOffset / pageSize) + 1, pageSize };
   });
