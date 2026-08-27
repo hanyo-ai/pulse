@@ -196,6 +196,29 @@ function listModelsForKey(gatewayKey: string, format?: string): string[] | null 
   return [...out];
 }
 
+// 模型 → provider 格式映射（供 taus 等客户端自动适配调用格式）。
+// 同一模型可能出现在多个 endpoint（罕见），取第一个非空格式。
+function modelFormatsForKey(gatewayKey: string): Record<string, string> | null {
+  const db = getDb();
+  const keyRow = db.query("SELECT models, enabled FROM gateway_keys WHERE key = ?").get(gatewayKey) as
+    { models: string; enabled: number } | null;
+  if (!keyRow) return null;
+  if (!keyRow.enabled) return null;
+  const whitelist = parseModels(keyRow.models);
+
+  const endpoints = db.query(`SELECT ${EP_COLS} FROM endpoints WHERE enabled = 1`).all() as EndpointRow[];
+  const out: Record<string, string> = {};
+  for (const ep of endpoints) {
+    const models = parseModels(ep.models);
+    const effective = models.length > 0 ? models : (ep.model_name ? [ep.model_name] : []);
+    for (const m of effective) {
+      if (whitelist && whitelist.length > 0 && !whitelist.includes(m)) continue;
+      if (out[m] === undefined && ep.provider_format) out[m] = ep.provider_format;
+    }
+  }
+  return out;
+}
+
 interface UsageInfo {
   inputTokens: number;
   outputTokens: number;
@@ -904,11 +927,14 @@ const app = new Elysia()
       set.status = 401;
       return { error: "Invalid or disabled API key" };
     }
+    // 附上每个模型的 provider_format（anthropic / openai），供 taus 自动适配调用格式
+    const formats = modelFormatsForKey(gatewayKey) || {};
     const data = modelIds.map((id) => ({
       id,
       type: "model",
       created_at: "2024-01-01T00:00:00Z",
       display_name: id,
+      provider_format: formats[id] || "",
     }));
     return {
       data,
